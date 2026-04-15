@@ -46,20 +46,20 @@ type ErrorResponse struct {
 
 func main() {
 	// Get configuration from environment variables
-	llamaServerURL = os.Getenv("LLAMA_SERVER_URL")
+	llamaServerURL = os.Getenv("SIMPLE_LLAMA_SERVER_URL")
 	if llamaServerURL == "" {
 		llamaServerURL = "http://localhost:8080"
 	}
 
-	adminAPIKey = os.Getenv("ADMIN_API_KEY")
+	adminAPIKey = os.Getenv("SIMPLE_ADMIN_API_KEY")
 	if adminAPIKey == "" {
 		adminAPIKey = generateAPIKey()
 		log.Printf("Generated admin API key: %s", adminAPIKey)
-		log.Println("Set ADMIN_API_KEY environment variable to use a custom key")
+		log.Println("Set SIMPLE_ADMIN_API_KEY environment variable to use a custom key")
 	}
 
 	// Setup data directory
-	dataPath := os.Getenv("DATA_PATH")
+	dataPath := os.Getenv("SIMPLE_DATA_PATH")
 	if dataPath == "" {
 		// Get executable directory
 		execPath, err := os.Executable()
@@ -96,7 +96,7 @@ func main() {
 	http.HandleFunc("/v1/", userAuthMiddleware(handleProxy))
 	http.HandleFunc("/", userAuthMiddleware(handleProxy))
 
-	port := os.Getenv("PORT")
+	port := os.Getenv("SIMPLE_PORT")
 	if port == "" {
 		port = "8081"
 	}

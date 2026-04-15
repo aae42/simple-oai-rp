@@ -8,7 +8,7 @@ build:
 
 # Run
 run:
-  DATA_PATH=./data go run main.go
+  SIMPLE_DATA_PATH=./data go run main.go
 
 # Install dependencies
 install:
