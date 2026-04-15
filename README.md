@@ -26,22 +26,22 @@ Start the proxy with default settings:
 ```
 
 The proxy will:
-- Start on port `8081` (configurable via `PORT` env var)
-- Proxy to `http://localhost:8080` (configurable via `LLAMA_SERVER_URL` env var)
+- Start on port `8081` (configurable via `SIMPLE_PORT` env var)
+- Proxy to `http://localhost:8080` (configurable via `SIMPLE_LLAMA_SERVER_URL` env var)
 - Generate an admin API key and print it to stdout
-- Create a SQLite database at `./proxy.db` (configurable via `DB_PATH` env var)
+- Use SQLite database at `./data/main.db` (configurable via `SIMPLE_DATA_PATH` env var)
 
 ### Configuration
 
-Configure the proxy using environment variables:
+Configure the proxy using environment variables (see `.env.example`):
 
 ```bash
-export LLAMA_SERVER_URL="http://localhost:8080"  # Your llama-server URL
-export PORT="8081"                                # Port to listen on
-export ADMIN_API_KEY="sk-admin-your-secret-key"  # Admin API key (auto-generated if not set)
-export DB_PATH="./proxy.db"                       # SQLite database path
+export SIMPLE_LLAMA_SERVER_URL="http://localhost:8080"  # Your llama-server URL
+export SIMPLE_PORT="8081"                                 # Port to listen on
+export SIMPLE_ADMIN_API_KEY="sk-admin-your-secret-key"  # Admin API key (auto-generated if not set)
+export SIMPLE_DATA_PATH="./data"                          # Data directory path
 
-./simple-oi-rp
+./simple-oai-rp
 ```
 
 ## Usage
@@ -124,15 +124,21 @@ After=network.target
 Type=simple
 User=youruser
 WorkingDirectory=/opt/oai-proxy
-Environment="LLAMA_SERVER_URL=http://localhost:8080"
-Environment="PORT=8081"
-Environment="ADMIN_API_KEY=sk-your-admin-key"
-Environment="DB_PATH=/var/lib/oai-proxy/proxy.db"
-ExecStart=/opt/oai-proxy/proxy
+Environment="SIMPLE_LLAMA_SERVER_URL=http://localhost:8080"
+Environment="SIMPLE_PORT=8081"
+Environment="SIMPLE_ADMIN_API_KEY=sk-your-admin-key"
+Environment="SIMPLE_DATA_PATH=/var/lib/oai-proxy/data"
+ExecStart=/opt/oai-proxy/simple-oai-rp
 Restart=always
 
 [Install]
 WantedBy=multi-user.target
+```
+
+Before starting, run migrations:
+```bash
+cd /opt/oai-proxy
+DATABASE_URL=sqlite:/var/lib/oai-proxy/data/main.db dbmate --migrations-dir ./db/migrations up
 ```
 
 Enable and start:

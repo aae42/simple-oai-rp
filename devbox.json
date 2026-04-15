@@ -3,7 +3,8 @@
   "packages": [
     "go@latest",
     "just@latest",
-    "golangci-lint@latest"
+    "golangci-lint@latest",
+    "dbmate@latest"
   ],
   "shell": {
     "init_hook": [

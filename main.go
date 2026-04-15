@@ -86,9 +86,8 @@ func main() {
 	}
 	defer db.Close()
 
-	if err := initDB(); err != nil {
-		log.Fatal("Failed to initialize database:", err)
-	}
+	// Database migrations are handled by dbmate
+	// Run: just db-migrate
 
 	// Setup routes
 	http.HandleFunc("/admin/users", adminAuthMiddleware(handleCreateUser))
@@ -105,53 +104,10 @@ func main() {
 	log.Printf("Proxying to llama-server at: %s", llamaServerURL)
 	log.Printf("Data directory: %s", dataPath)
 	log.Printf("Database: %s", dbPath)
-	log.Printf("Admin API Key: %s", adminAPIKey)
 
 	if err := http.ListenAndServe(":"+port, nil); err != nil {
 		log.Fatal("Server failed:", err)
 	}
-}
-
-func initDB() error {
-	// Create users table
-	_, err := db.Exec(`
-		CREATE TABLE IF NOT EXISTS users (
-			id INTEGER PRIMARY KEY AUTOINCREMENT,
-			username TEXT UNIQUE NOT NULL,
-			api_key TEXT UNIQUE NOT NULL,
-			created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-		)
-	`)
-	if err != nil {
-		return fmt.Errorf("failed to create users table: %w", err)
-	}
-
-	// Create request_logs table
-	_, err = db.Exec(`
-		CREATE TABLE IF NOT EXISTS request_logs (
-			id INTEGER PRIMARY KEY AUTOINCREMENT,
-			user_id INTEGER NOT NULL,
-			username TEXT NOT NULL,
-			ip_address TEXT NOT NULL,
-			method TEXT NOT NULL,
-			path TEXT NOT NULL,
-			request_body TEXT,
-			response_body TEXT,
-			status_code INTEGER,
-			created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-			FOREIGN KEY (user_id) REFERENCES users(id)
-		)
-	`)
-	if err != nil {
-		return fmt.Errorf("failed to create request_logs table: %w", err)
-	}
-
-	// Create indexes for better performance
-	db.Exec("CREATE INDEX IF NOT EXISTS idx_users_api_key ON users(api_key)")
-	db.Exec("CREATE INDEX IF NOT EXISTS idx_request_logs_user_id ON request_logs(user_id)")
-	db.Exec("CREATE INDEX IF NOT EXISTS idx_request_logs_created_at ON request_logs(created_at)")
-
-	return nil
 }
 
 func generateAPIKey() string {
