@@ -1,4 +1,4 @@
-simple-oai-rp
 .env
 .envrc
 data/
+build/

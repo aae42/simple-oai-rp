@@ -6,7 +6,10 @@ set dotenv-load := true
 
 # Build
 build:
-  go build -o simple-oai-rp main.go
+  mkdir -p build
+  GOOS=linux GOARCH=amd64 go build -o build/simple-oai-rp-linux-amd64 main.go
+  GOOS=darwin GOARCH=arm64 go build -o build/simple-oai-rp-macos-arm64 main.go
+
 
 # Run (with migrations)
 run:
@@ -22,7 +25,7 @@ install:
 # Clean build artifacts
 clean:
   @echo "Cleaning..."
-  rm -f simple-oai-rp
+  rm -rf build/
   rm -rf data/
 
 # Run tests

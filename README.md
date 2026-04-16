@@ -1,17 +1,13 @@
 # Simple OpenAI Reverse Proxy
 
-A lightweight Go web service that provides authentication and request logging
-for llama-server instances.
-This proxy adds OpenAI-compatible API key authentication to llama-server,
-which doesn't have built-in authentication.
+A lightweight Go web service that provides authentication for openai compatible
+APIs like [llama-server](https://github.com/ggml-org/llama.cpp/tree/master/tools/server)
+instances.
 
 ## Features
 
 - 🔐 **OpenAI-compatible API key authentication** - Secure your llama-server
   with standard Bearer token auth
-- 👥 **User management** - Admin endpoint to create users and generate API keys
-- 📊 **Request logging** - All requests are logged to SQLite with user info,
-  IP addresses, and full request/response data
 - 🚀 **Simple deployment** - Single binary, SQLite database, minimal
   configuration
 - 🔄 **Transparent proxying** - Forwards all requests to llama-server while
@@ -37,9 +33,9 @@ Configure the proxy using environment variables (see `.env.example`):
 
 ```bash
 export SIMPLE_LLAMA_SERVER_URL="http://localhost:8080"  # Your llama-server URL
-export SIMPLE_PORT="8081"                                 # Port to listen on
-export SIMPLE_ADMIN_API_KEY_HASH="$argon2id$v=19$..."    # Admin API key hash (auto-generated if not set)
-export SIMPLE_DATA_PATH="./data"                          # Data directory path
+export SIMPLE_PORT="8081"                               # Port to listen on
+export SIMPLE_ADMIN_API_KEY_HASH="$argon2id$v=19$..."   # Admin API key hash (auto-generated if not set)
+export SIMPLE_DATA_PATH="./data"                        # Data directory path
 
 ./simple-oai-rp
 ```
