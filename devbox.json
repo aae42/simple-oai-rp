@@ -4,7 +4,8 @@
     "go@latest",
     "just@latest",
     "golangci-lint@latest",
-    "dbmate@latest"
+    "dbmate@latest",
+    "sqlite@latest"
   ],
   "shell": {
     "init_hook": [
