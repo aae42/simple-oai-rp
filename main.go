@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"bytes"
 	"crypto/rand"
 	"crypto/subtle"
@@ -395,6 +396,20 @@ func handleListUsers(w http.ResponseWriter, r *http.Request) {
 	respondJSON(w, http.StatusOK, users)
 }
 
+// isStreamingRequest checks if the request body contains "stream": true
+func isStreamingRequest(body []byte) bool {
+	var req map[string]interface{}
+	if err := json.Unmarshal(body, &req); err != nil {
+		return false
+	}
+	if stream, ok := req["stream"]; ok {
+		if streamBool, ok := stream.(bool); ok {
+			return streamBool
+		}
+	}
+	return false
+}
+
 func handleProxy(w http.ResponseWriter, r *http.Request) {
 	// Get user info from headers (set by middleware)
 	userID := r.Header.Get("X-User-ID")
@@ -413,6 +428,9 @@ func handleProxy(w http.ResponseWriter, r *http.Request) {
 		}
 		r.Body.Close()
 	}
+
+	// Check if this is a streaming request
+	isStreaming := isStreamingRequest(requestBody)
 
 	// Create proxy request
 	targetURL := llamaServerURL + r.URL.Path
@@ -436,8 +454,16 @@ func handleProxy(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Execute proxy request
-	client := &http.Client{Timeout: 300 * time.Second}
+	// Execute proxy request - use a transport without timeout for streaming
+	var client *http.Client
+	if isStreaming {
+		// For streaming requests, don't set a timeout on the client
+		// The connection will stay open until the stream completes
+		client = &http.Client{}
+	} else {
+		client = &http.Client{Timeout: 300 * time.Second}
+	}
+
 	resp, err := client.Do(proxyReq)
 	if err != nil {
 		log.Printf("Error executing proxy request: %v", err)
@@ -449,7 +475,13 @@ func handleProxy(w http.ResponseWriter, r *http.Request) {
 	}
 	defer resp.Body.Close()
 
-	// Read response body
+	// Handle streaming response
+	if isStreaming {
+		handleStreamingResponse(w, resp, userID, username, ipAddress, r.Method, r.URL.Path, requestBody)
+		return
+	}
+
+	// Non-streaming: read entire response body
 	responseBody, err := io.ReadAll(resp.Body)
 	if err != nil {
 		log.Printf("Error reading response body: %v", err)
@@ -472,6 +504,81 @@ func handleProxy(w http.ResponseWriter, r *http.Request) {
 	w.Write(responseBody)
 
 	log.Printf("Proxied request: user=%s ip=%s method=%s path=%s status=%d", username, ipAddress, r.Method, r.URL.Path, resp.StatusCode)
+}
+
+func handleStreamingResponse(w http.ResponseWriter, resp *http.Response, userID, username, ipAddress, method, path string, requestBody []byte) {
+	// Check if we can flush (required for streaming)
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		log.Printf("ResponseWriter does not support flushing, falling back to buffered response")
+		// Fall back to buffered response
+		responseBody, err := io.ReadAll(resp.Body)
+		if err != nil {
+			log.Printf("Error reading response body: %v", err)
+			respondJSON(w, http.StatusInternalServerError, ErrorResponse{Error: "Failed to read response"})
+			return
+		}
+		go logRequest(userID, username, ipAddress, method, path, requestBody, responseBody, resp.StatusCode)
+		for key, values := range resp.Header {
+			for _, value := range values {
+				w.Header().Add(key, value)
+			}
+		}
+		w.WriteHeader(resp.StatusCode)
+		w.Write(responseBody)
+		return
+	}
+
+	// Copy response headers for SSE
+	for key, values := range resp.Header {
+		for _, value := range values {
+			w.Header().Add(key, value)
+		}
+	}
+
+	// Ensure proper headers for SSE streaming
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+	w.Header().Set("X-Accel-Buffering", "no") // Disable nginx buffering if present
+
+	w.WriteHeader(resp.StatusCode)
+
+	// Buffer to collect the full response for logging
+	var responseBuffer bytes.Buffer
+
+	// Use a buffered reader to read line by line (SSE format)
+	reader := bufio.NewReader(resp.Body)
+
+	for {
+		line, err := reader.ReadBytes('\n')
+		if len(line) > 0 {
+			// Write to response buffer for logging
+			responseBuffer.Write(line)
+
+			// Write to client
+			_, writeErr := w.Write(line)
+			if writeErr != nil {
+				log.Printf("Error writing streaming response: %v", writeErr)
+				break
+			}
+
+			// Flush immediately to send the chunk to the client
+			flusher.Flush()
+		}
+
+		if err != nil {
+			if err != io.EOF {
+				log.Printf("Error reading streaming response: %v", err)
+			}
+			break
+		}
+	}
+
+	// Log the complete streamed response asynchronously
+	go logRequest(userID, username, ipAddress, method, path, requestBody, responseBuffer.Bytes(), resp.StatusCode)
+
+	log.Printf("Proxied streaming request: user=%s ip=%s method=%s path=%s status=%d", username, ipAddress, method, path, resp.StatusCode)
 }
 
 func logRequest(userID, username, ipAddress, method, path string, requestBody, responseBody []byte, statusCode int) {
