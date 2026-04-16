@@ -38,7 +38,7 @@ Configure the proxy using environment variables (see `.env.example`):
 ```bash
 export SIMPLE_LLAMA_SERVER_URL="http://localhost:8080"  # Your llama-server URL
 export SIMPLE_PORT="8081"                                 # Port to listen on
-export SIMPLE_ADMIN_API_KEY="sk-admin-your-secret-key"  # Admin API key (auto-generated if not set)
+export SIMPLE_ADMIN_API_KEY_HASH="$argon2id$v=19$..."    # Admin API key hash (auto-generated if not set)
 export SIMPLE_DATA_PATH="./data"                          # Data directory path
 
 ./simple-oai-rp
@@ -126,7 +126,7 @@ User=youruser
 WorkingDirectory=/opt/oai-proxy
 Environment="SIMPLE_LLAMA_SERVER_URL=http://localhost:8080"
 Environment="SIMPLE_PORT=8081"
-Environment="SIMPLE_ADMIN_API_KEY=sk-your-admin-key"
+Environment="SIMPLE_ADMIN_API_KEY_HASH=$argon2id$v=19$m=19456,t=2,p=1$your-hash-here"
 Environment="SIMPLE_DATA_PATH=/var/lib/oai-proxy/data"
 ExecStart=/opt/oai-proxy/simple-oai-rp
 Restart=always

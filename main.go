@@ -3,7 +3,9 @@ package main
 import (
 	"bytes"
 	"crypto/rand"
+	"crypto/subtle"
 	"database/sql"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -16,19 +18,33 @@ import (
 	"time"
 
 	_ "github.com/mattn/go-sqlite3"
+	"golang.org/x/crypto/argon2"
 )
 
+// Argon2id parameters (OWASP recommended)
+const (
+	argon2Time    = 2
+	argon2Memory  = 19 * 1024 // 19 MiB
+	argon2Threads = 1
+	argon2KeyLen  = 32
+	argon2SaltLen = 16
+)
+
+// API key prefix length for fast lookup (unhashed portion)
+// Format: prefix$argon2id$...
+const apiKeyPrefixLen = 8
+
 var (
-	db             *sql.DB
-	llamaServerURL string
-	adminAPIKey    string
+	db               *sql.DB
+	llamaServerURL   string
+	adminAPIKeyHash  string
 )
 
 type User struct {
-	ID        int       `json:"id"`
-	Username  string    `json:"username"`
-	APIKey    string    `json:"api_key"`
-	CreatedAt time.Time `json:"created_at"`
+	ID         int       `json:"id"`
+	Username   string    `json:"username"`
+	APIKeyHash string    `json:"api_key_hash,omitempty"`
+	CreatedAt  time.Time `json:"created_at"`
 }
 
 type CreateUserRequest struct {
@@ -51,11 +67,18 @@ func main() {
 		llamaServerURL = "http://localhost:8080"
 	}
 
-	adminAPIKey = os.Getenv("SIMPLE_ADMIN_API_KEY")
-	if adminAPIKey == "" {
-		adminAPIKey = generateAPIKey()
+	adminAPIKeyHash = os.Getenv("SIMPLE_ADMIN_API_KEY_HASH")
+	if adminAPIKeyHash == "" {
+		// Generate a new admin API key and hash it
+		adminAPIKey := generateAPIKey()
+		var err error
+		adminAPIKeyHash, err = hashAPIKey(adminAPIKey)
+		if err != nil {
+			log.Fatal("Failed to hash admin API key:", err)
+		}
 		log.Printf("Generated admin API key: %s", adminAPIKey)
-		log.Println("Set SIMPLE_ADMIN_API_KEY environment variable to use a custom key")
+		log.Printf("Admin API key hash: %s", adminAPIKeyHash)
+		log.Println("Set SIMPLE_ADMIN_API_KEY_HASH environment variable to use a custom key hash")
 	}
 
 	// Setup data directory
@@ -118,6 +141,95 @@ func generateAPIKey() string {
 	return "sk-" + hex.EncodeToString(bytes)
 }
 
+// hashAPIKey creates an argon2id hash of the API key with an unhashed prefix for fast lookup
+// Returns the hash in the format: <prefix>$argon2id$v=19$m=19456,t=2,p=1$<salt>$<hash>
+// The prefix is the first apiKeyPrefixLen characters of the API key (unhashed)
+func hashAPIKey(apiKey string) (string, error) {
+	salt := make([]byte, argon2SaltLen)
+	if _, err := rand.Read(salt); err != nil {
+		return "", fmt.Errorf("failed to generate salt: %w", err)
+	}
+
+	hash := argon2.IDKey([]byte(apiKey), salt, argon2Time, argon2Memory, argon2Threads, argon2KeyLen)
+
+	// Encode in PHC string format with prefix
+	b64Salt := base64.RawStdEncoding.EncodeToString(salt)
+	b64Hash := base64.RawStdEncoding.EncodeToString(hash)
+
+	// Extract prefix from API key (e.g., "sk-abc12" from "sk-abc123...")
+	prefix := apiKey
+	if len(apiKey) > apiKeyPrefixLen {
+		prefix = apiKey[:apiKeyPrefixLen]
+	}
+
+	return fmt.Sprintf("%s$argon2id$v=%d$m=%d,t=%d,p=%d$%s$%s",
+		prefix, argon2.Version, argon2Memory, argon2Time, argon2Threads, b64Salt, b64Hash), nil
+}
+
+// extractPrefix extracts the unhashed prefix from a stored hash
+func extractPrefix(encodedHash string) string {
+	// Format: <prefix>$argon2id$...
+	idx := strings.Index(encodedHash, "$argon2id$")
+	if idx == -1 {
+		return ""
+	}
+	return encodedHash[:idx]
+}
+
+// verifyAPIKey verifies an API key against an argon2id hash
+// Format: <prefix>$argon2id$v=X$m=X,t=X,p=X$salt$hash (6 parts when split by $)
+func verifyAPIKey(apiKey, encodedHash string) (bool, error) {
+	// Parse the PHC string format with prefix
+	parts := strings.Split(encodedHash, "$")
+	if len(parts) != 6 {
+		return false, fmt.Errorf("invalid hash format: expected 6 parts, got %d", len(parts))
+	}
+
+	// parts[0] is the prefix, parts[1] is "argon2id", etc.
+	storedPrefix := parts[0]
+	if parts[1] != "argon2id" {
+		return false, fmt.Errorf("invalid algorithm: %s", parts[1])
+	}
+
+	// Quick prefix check before expensive hash verification
+	prefix := apiKey
+	if len(apiKey) > apiKeyPrefixLen {
+		prefix = apiKey[:apiKeyPrefixLen]
+	}
+	if storedPrefix != prefix {
+		return false, nil
+	}
+
+	var version int
+	_, err := fmt.Sscanf(parts[2], "v=%d", &version)
+	if err != nil {
+		return false, fmt.Errorf("invalid version: %w", err)
+	}
+
+	var memory, time uint32
+	var threads uint8
+	_, err = fmt.Sscanf(parts[3], "m=%d,t=%d,p=%d", &memory, &time, &threads)
+	if err != nil {
+		return false, fmt.Errorf("invalid parameters: %w", err)
+	}
+
+	salt, err := base64.RawStdEncoding.DecodeString(parts[4])
+	if err != nil {
+		return false, fmt.Errorf("invalid salt: %w", err)
+	}
+
+	expectedHash, err := base64.RawStdEncoding.DecodeString(parts[5])
+	if err != nil {
+		return false, fmt.Errorf("invalid hash: %w", err)
+	}
+
+	// Compute hash with same parameters
+	computedHash := argon2.IDKey([]byte(apiKey), salt, time, memory, threads, uint32(len(expectedHash)))
+
+	// Constant-time comparison
+	return subtle.ConstantTimeCompare(computedHash, expectedHash) == 1, nil
+}
+
 func adminAuthMiddleware(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		authHeader := r.Header.Get("Authorization")
@@ -130,7 +242,14 @@ func adminAuthMiddleware(next http.HandlerFunc) http.HandlerFunc {
 		token := strings.TrimPrefix(authHeader, "Bearer ")
 		token = strings.TrimSpace(token)
 
-		if token != adminAPIKey {
+		valid, err := verifyAPIKey(token, adminAPIKeyHash)
+		if err != nil {
+			log.Printf("Error verifying admin API key: %v", err)
+			respondJSON(w, http.StatusUnauthorized, ErrorResponse{Error: "Invalid admin API key"})
+			return
+		}
+
+		if !valid {
 			respondJSON(w, http.StatusUnauthorized, ErrorResponse{Error: "Invalid admin API key"})
 			return
 		}
@@ -151,23 +270,49 @@ func userAuthMiddleware(next http.HandlerFunc) http.HandlerFunc {
 		token := strings.TrimPrefix(authHeader, "Bearer ")
 		token = strings.TrimSpace(token)
 
-		// Verify API key
-		var user User
-		err := db.QueryRow("SELECT id, username, api_key, created_at FROM users WHERE api_key = ?", token).
-			Scan(&user.ID, &user.Username, &user.APIKey, &user.CreatedAt)
+		// Extract prefix from the API key for fast lookup
+		prefix := token
+		if len(token) > apiKeyPrefixLen {
+			prefix = token[:apiKeyPrefixLen]
+		}
 
-		if err == sql.ErrNoRows {
-			respondJSON(w, http.StatusUnauthorized, ErrorResponse{Error: "Invalid API key"})
-			return
-		} else if err != nil {
+		// Query only users whose hash starts with the same prefix
+		rows, err := db.Query("SELECT id, username, api_key_hash, created_at FROM users WHERE api_key_hash LIKE ?", prefix+"%")
+		if err != nil {
 			log.Printf("Database error: %v", err)
 			respondJSON(w, http.StatusInternalServerError, ErrorResponse{Error: "Internal server error"})
 			return
 		}
+		defer rows.Close()
+
+		var authenticatedUser *User
+		for rows.Next() {
+			var user User
+			if err := rows.Scan(&user.ID, &user.Username, &user.APIKeyHash, &user.CreatedAt); err != nil {
+				log.Printf("Scan error: %v", err)
+				continue
+			}
+
+			valid, err := verifyAPIKey(token, user.APIKeyHash)
+			if err != nil {
+				log.Printf("Error verifying API key for user %s: %v", user.Username, err)
+				continue
+			}
+
+			if valid {
+				authenticatedUser = &user
+				break
+			}
+		}
+
+		if authenticatedUser == nil {
+			respondJSON(w, http.StatusUnauthorized, ErrorResponse{Error: "Invalid API key"})
+			return
+		}
 
 		// Store user info in request headers for use in handler
-		r.Header.Set("X-User-ID", fmt.Sprintf("%d", user.ID))
-		r.Header.Set("X-Username", user.Username)
+		r.Header.Set("X-User-ID", fmt.Sprintf("%d", authenticatedUser.ID))
+		r.Header.Set("X-Username", authenticatedUser.Username)
 
 		next(w, r)
 	}
@@ -190,11 +335,17 @@ func handleCreateUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Generate API key
+	// Generate API key and hash it
 	apiKey := generateAPIKey()
+	apiKeyHash, err := hashAPIKey(apiKey)
+	if err != nil {
+		log.Printf("Error hashing API key: %v", err)
+		respondJSON(w, http.StatusInternalServerError, ErrorResponse{Error: "Failed to create user"})
+		return
+	}
 
-	// Insert user into database
-	_, err := db.Exec("INSERT INTO users (username, api_key) VALUES (?, ?)", req.Username, apiKey)
+	// Insert user into database with hashed API key
+	_, err = db.Exec("INSERT INTO users (username, api_key_hash) VALUES (?, ?)", req.Username, apiKeyHash)
 	if err != nil {
 		if strings.Contains(err.Error(), "UNIQUE constraint failed") {
 			respondJSON(w, http.StatusConflict, ErrorResponse{Error: "Username already exists"})
@@ -205,7 +356,7 @@ func handleCreateUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	log.Printf("Created user: %s with API key: %s", req.Username, apiKey)
+	log.Printf("Created user: %s", req.Username)
 
 	respondJSON(w, http.StatusCreated, CreateUserResponse{
 		Username: req.Username,
@@ -219,7 +370,7 @@ func handleListUsers(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	rows, err := db.Query("SELECT id, username, api_key, created_at FROM users ORDER BY created_at DESC")
+	rows, err := db.Query("SELECT id, username, created_at FROM users ORDER BY created_at DESC")
 	if err != nil {
 		log.Printf("Database error: %v", err)
 		respondJSON(w, http.StatusInternalServerError, ErrorResponse{Error: "Failed to list users"})
@@ -230,7 +381,7 @@ func handleListUsers(w http.ResponseWriter, r *http.Request) {
 	var users []User
 	for rows.Next() {
 		var user User
-		if err := rows.Scan(&user.ID, &user.Username, &user.APIKey, &user.CreatedAt); err != nil {
+		if err := rows.Scan(&user.ID, &user.Username, &user.CreatedAt); err != nil {
 			log.Printf("Scan error: %v", err)
 			continue
 		}
