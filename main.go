@@ -108,7 +108,7 @@ func main() {
 	if err != nil {
 		log.Fatal("Failed to open database:", err)
 	}
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	// Database migrations are handled by dbmate
 	// Run: just db-migrate
@@ -165,16 +165,6 @@ func hashAPIKey(apiKey string) (string, error) {
 
 	return fmt.Sprintf("%s$argon2id$v=%d$m=%d,t=%d,p=%d$%s$%s",
 		prefix, argon2.Version, argon2Memory, argon2Time, argon2Threads, b64Salt, b64Hash), nil
-}
-
-// extractPrefix extracts the unhashed prefix from a stored hash
-func extractPrefix(encodedHash string) string {
-	// Format: <prefix>$argon2id$...
-	idx := strings.Index(encodedHash, "$argon2id$")
-	if idx == -1 {
-		return ""
-	}
-	return encodedHash[:idx]
 }
 
 // verifyAPIKey verifies an API key against an argon2id hash
@@ -284,7 +274,7 @@ func userAuthMiddleware(next http.HandlerFunc) http.HandlerFunc {
 			respondJSON(w, http.StatusInternalServerError, ErrorResponse{Error: "Internal server error"})
 			return
 		}
-		defer rows.Close()
+		defer func() { _ = rows.Close() }()
 
 		var authenticatedUser *User
 		for rows.Next() {
@@ -377,7 +367,7 @@ func handleListUsers(w http.ResponseWriter, r *http.Request) {
 		respondJSON(w, http.StatusInternalServerError, ErrorResponse{Error: "Failed to list users"})
 		return
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var users []User
 	for rows.Next() {
@@ -426,7 +416,7 @@ func handleProxy(w http.ResponseWriter, r *http.Request) {
 			respondJSON(w, http.StatusInternalServerError, ErrorResponse{Error: "Failed to read request"})
 			return
 		}
-		r.Body.Close()
+		_ = r.Body.Close()
 	}
 
 	// Check if this is a streaming request
@@ -473,7 +463,7 @@ func handleProxy(w http.ResponseWriter, r *http.Request) {
 		go logRequest(userID, username, ipAddress, r.Method, r.URL.Path, requestBody, []byte(err.Error()), 502)
 		return
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	// Handle streaming response
 	if isStreaming {
@@ -501,7 +491,7 @@ func handleProxy(w http.ResponseWriter, r *http.Request) {
 
 	// Write response
 	w.WriteHeader(resp.StatusCode)
-	w.Write(responseBody)
+	_, _ = w.Write(responseBody)
 
 	log.Printf("Proxied request: user=%s ip=%s method=%s path=%s status=%d", username, ipAddress, r.Method, r.URL.Path, resp.StatusCode)
 }
@@ -525,7 +515,7 @@ func handleStreamingResponse(w http.ResponseWriter, resp *http.Response, userID,
 			}
 		}
 		w.WriteHeader(resp.StatusCode)
-		w.Write(responseBody)
+		_, _ = w.Write(responseBody)
 		return
 	}
 
@@ -617,5 +607,5 @@ func getClientIP(r *http.Request) string {
 func respondJSON(w http.ResponseWriter, status int, data interface{}) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
-	json.NewEncoder(w).Encode(data)
+	_ = json.NewEncoder(w).Encode(data)
 }
