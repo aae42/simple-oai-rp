@@ -18,8 +18,8 @@ import (
 	"strings"
 	"time"
 
-	_ "github.com/mattn/go-sqlite3"
 	"golang.org/x/crypto/argon2"
+	_ "modernc.org/sqlite"
 )
 
 // Argon2id parameters (OWASP recommended)
@@ -36,9 +36,9 @@ const (
 const apiKeyPrefixLen = 8
 
 var (
-	db               *sql.DB
-	llamaServerURL   string
-	adminAPIKeyHash  string
+	db              *sql.DB
+	oaiApiServerURL string
+	adminAPIKeyHash string
 )
 
 type User struct {
@@ -63,9 +63,9 @@ type ErrorResponse struct {
 
 func main() {
 	// Get configuration from environment variables
-	llamaServerURL = os.Getenv("SIMPLE_LLAMA_SERVER_URL")
-	if llamaServerURL == "" {
-		llamaServerURL = "http://localhost:8080"
+	oaiApiServerURL = os.Getenv("SIMPLE_OAI_API_SERVER_URL")
+	if oaiApiServerURL == "" {
+		oaiApiServerURL = "http://localhost:8080"
 	}
 
 	adminAPIKeyHash = os.Getenv("SIMPLE_ADMIN_API_KEY_HASH")
@@ -77,7 +77,7 @@ func main() {
 		if err != nil {
 			log.Fatal("Failed to hash admin API key:", err)
 		}
-		log.Printf("Generated admin API key: %s", adminAPIKey)
+		log.Printf("Generated admin API key: %s, save this somewhere safe, it will not be displayed again", adminAPIKey)
 		log.Printf("Admin API key hash: %s", adminAPIKeyHash)
 		log.Println("Set SIMPLE_ADMIN_API_KEY_HASH environment variable to use a custom key hash")
 	}
@@ -104,7 +104,7 @@ func main() {
 
 	// Initialize database
 	var err error
-	db, err = sql.Open("sqlite3", dbPath)
+	db, err = sql.Open("sqlite", dbPath)
 	if err != nil {
 		log.Fatal("Failed to open database:", err)
 	}
@@ -125,7 +125,7 @@ func main() {
 	}
 
 	log.Printf("Starting proxy server on port %s", port)
-	log.Printf("Proxying to llama-server at: %s", llamaServerURL)
+	log.Printf("Proxying to Open AI API-server at: %s", oaiApiServerURL)
 	log.Printf("Data directory: %s", dataPath)
 	log.Printf("Database: %s", dbPath)
 
@@ -433,7 +433,7 @@ func handleProxy(w http.ResponseWriter, r *http.Request) {
 	isStreaming := isStreamingRequest(requestBody)
 
 	// Create proxy request
-	targetURL := llamaServerURL + r.URL.Path
+	targetURL := oaiApiServerURL + r.URL.Path
 	if r.URL.RawQuery != "" {
 		targetURL += "?" + r.URL.RawQuery
 	}
@@ -467,7 +467,7 @@ func handleProxy(w http.ResponseWriter, r *http.Request) {
 	resp, err := client.Do(proxyReq)
 	if err != nil {
 		log.Printf("Error executing proxy request: %v", err)
-		respondJSON(w, http.StatusBadGateway, ErrorResponse{Error: "Failed to reach llama-server"})
+		respondJSON(w, http.StatusBadGateway, ErrorResponse{Error: "Failed to reach OpenAI API server"})
 
 		// Log failed request
 		go logRequest(userID, username, ipAddress, r.Method, r.URL.Path, requestBody, []byte(err.Error()), 502)

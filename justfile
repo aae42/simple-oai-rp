@@ -6,15 +6,15 @@ set dotenv-load := true
 
 # Build
 build:
-  mkdir -p build
-  GOOS=linux GOARCH=amd64 go build -o build/simple-oai-rp-linux-amd64 main.go
-  GOOS=darwin GOARCH=arm64 go build -o build/simple-oai-rp-macos-arm64 main.go
-
+  mkdir -p build/linux/amd64
+  mkdir -p build/macos/arm64
+  CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o build/linux/amd64/simple-oai-rp main.go
+  CGO_ENABLED=0 GOOS=darwin GOARCH=arm64 go build -o build/macos/arm64/simple-oai-rp main.go
 
 # Run (with migrations)
 run:
   @mkdir -p ./data
-  dbmate up
+  just dbm-up
   SIMPLE_DATA_PATH=./data go run main.go
 
 # Install dependencies
@@ -70,13 +70,22 @@ dbm-status:
 dbm-dump:
   dbmate dump
 
+# SERVER INTERACTION: list users
 admin-user-list:
-  curl http://localhost:8081/admin/users/list \
-    -H "Authorization: Bearer $SIMPLE_ADMIN_API_KEY" \
+  curl $SERVER_URL/admin/users/list \
+    -H "Authorization: Bearer $ADMIN_KEY" \
     -H "Content-Type: application/json"
 
+# SERVER INTERACTION: create an API user
 admin-user-create USER:
-  curl -X POST http://localhost:8081/admin/users \
-    -H "Authorization: Bearer $SIMPLE_ADMIN_API_KEY" \
+  curl -X POST $SERVER_URL/admin/users \
+    -H "Authorization: Bearer $ADMIN_KEY" \
     -H "Content-Type: application/json" \
     -d '{"username": "{{USER}}"}'
+
+# SERVER INTERACTION: test user interaction with server
+user-chat *CHAT:
+  curl $SERVER_URL/v1/chat/completions \
+    -H "Authorization: Bearer $USER_KEY" \
+    -H "Content-Type: application/json" \
+    -d '{"messages": [{"role": "user", "content": "{{CHAT}}"}]}'
