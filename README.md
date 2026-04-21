@@ -5,7 +5,7 @@ APIs like [llama-server](https://github.com/ggml-org/llama.cpp/tree/master/tools
 
 ## Features
 
-- 🔐 **OpenAI-compatible API key authentication** - Secure your Open AI
+- 🔐 **OpenAI-compatible API key authentication** - Secure your OpenAI
   API-compatible server with standard Bearer token auth
 - 🚀 **Simple deployment** - Single binary, SQLite database, minimal
   configuration
@@ -26,9 +26,15 @@ The proxy will:
 - Proxy to `http://localhost:8080` (configurable via `SIMPLE_OAI_API_SERVER_URL`
   env var)
 - If an admin API key hash is not supplied,
-  it will generate an admin API key and print it and it's hash to stdout
-- Use SQLite database at `./data/main.db` (configurable via `SIMPLE_DATA_PATH`
-  env var)
+  it will generate an admin API key and print it and its hash to stdout
+- Use SQLite database at `<executable-directory>/data/main.db` by default
+  (configurable via `SIMPLE_DATA_PATH` env var)
+
+Before creating users, run database migrations.
+
+```bash
+devbox run -- just dbm-up
+```
 
 ### Configuration
 
@@ -40,7 +46,7 @@ export SIMPLE_OAI_API_SERVER_URL="http://localhost:8080"
 # Port to listen on
 export SIMPLE_PORT="8081"
 # Admin API key hash (auto-generated if not set)
-export SIMPLE_ADMIN_API_KEY_HASH='$argon2id$v=19$...'
+export SIMPLE_ADMIN_API_KEY_HASH='sk-abcd123$argon2id$v=19$m=19456,t=2,p=1$<salt>$<hash>'
 # Data directory path
 export SIMPLE_DATA_PATH="./data"
 
@@ -65,8 +71,7 @@ Response:
 ```json
 {
   "username": "john",
-  "api_key": "sk-abc123...",
-  "created_at": "2024-01-15T10:30:00Z"
+  "api_key": "sk-abc123..."
 }
 ```
 
@@ -110,8 +115,17 @@ curl http://localhost:8081/v1/chat/completions \
 
 ## Development
 
-Have devbox.
-Run `just`.
+With devbox installed:
+
+```bash
+devbox run -- just run
+```
+
+To see all available commands:
+
+```bash
+devbox run -- just
+```
 
 ## Production Deployment
 
@@ -130,7 +144,7 @@ User=youruser
 WorkingDirectory=/opt/simple-oai-rp
 Environment="SIMPLE_OAI_API_SERVER_URL=http://localhost:8080"
 Environment="SIMPLE_PORT=8081"
-Environment="SIMPLE_ADMIN_API_KEY_HASH=$argon2id$v=19$m=19456,t=2,p=1$your-hash-here"
+Environment="SIMPLE_ADMIN_API_KEY_HASH=sk-abcd123$argon2id$v=19$m=19456,t=2,p=1$<salt>$<hash>"
 Environment="SIMPLE_DATA_PATH=/var/lib/oai-proxy/data"
 ExecStart=/opt/simple-oai-rp/simple-oai-rp
 Restart=always
