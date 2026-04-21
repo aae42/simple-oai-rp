@@ -76,6 +76,12 @@ admin-user-list:
     -H "Authorization: Bearer $ADMIN_KEY" \
     -H "Content-Type: application/json"
 
+# SERVER INTERACTION: show user activity
+admin-user-activity:
+  curl $SERVER_URL/admin/users/activity \
+    -H "Authorization: Bearer $ADMIN_KEY" \
+    -H "Content-Type: application/json"
+
 # SERVER INTERACTION: create an API user
 admin-user-create USER:
   curl -X POST $SERVER_URL/admin/users \

@@ -61,6 +61,11 @@ type ErrorResponse struct {
 	Error string `json:"error"`
 }
 
+type UserActivityResponse struct {
+	Username     string          `json:"username"`
+	RequestCount int             `json:"request_count"`
+}
+
 func main() {
 	// Get configuration from environment variables
 	oaiApiServerURL = os.Getenv("SIMPLE_OAI_API_SERVER_URL")
@@ -116,6 +121,7 @@ func main() {
 	// Setup routes
 	http.HandleFunc("/admin/users", adminAuthMiddleware(handleCreateUser))
 	http.HandleFunc("/admin/users/list", adminAuthMiddleware(handleListUsers))
+	http.HandleFunc("/admin/users/activity", adminAuthMiddleware(handleUserActivity))
 	http.HandleFunc("/v1/", userAuthMiddleware(handleProxy))
 	http.HandleFunc("/", userAuthMiddleware(handleProxy))
 
@@ -381,6 +387,37 @@ func handleListUsers(w http.ResponseWriter, r *http.Request) {
 
 	if users == nil {
 		users = []User{}
+	}
+
+	respondJSON(w, http.StatusOK, users)
+}
+
+func handleUserActivity(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		respondJSON(w, http.StatusMethodNotAllowed, ErrorResponse{Error: "Method not allowed"})
+		return
+	}
+
+	rows, err := db.Query(`SELECT username, COUNT(*) AS request_count FROM request_logs GROUP BY username ORDER BY request_count DESC`)
+	if err != nil {
+		log.Printf("Database error: %v", err)
+		respondJSON(w, http.StatusInternalServerError, ErrorResponse{Error: "Failed to get user activity"})
+		return
+	}
+	defer func() { _ = rows.Close() }()
+
+	var users []UserActivityResponse
+	for rows.Next() {
+		var ua UserActivityResponse
+		if err := rows.Scan(&ua.Username, &ua.RequestCount); err != nil {
+			log.Printf("Scan error: %v", err)
+			continue
+		}
+		users = append(users, ua)
+	}
+
+	if users == nil {
+		users = []UserActivityResponse{}
 	}
 
 	respondJSON(w, http.StatusOK, users)
